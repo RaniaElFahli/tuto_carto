@@ -3,7 +3,7 @@ title: "Arranger plusieurs cartes sur R"
 author: "Rania El Fahli"
 date: "2024-04-15"
 output: 
- html_document:
+  html_document:
     toc: true
     toc_depth : 6
     toc_float: true
@@ -21,14 +21,24 @@ knitr::opts_chunk$set(
 )
 ```
 
+```{css, include=FALSE}
+<style>
+p.caption {
+  font-size: 0.6em;
+  font-style: italic;
+}
+</style>
+
+```
+
+
 ```{r include=F}
-library(ggplot2) ;library(cowplot) ; library(tmap) ;library(tmaptools) ; library(readxl)  ; library(classInt) ; library(dplyr); 
+library(ggplot2) ;library(cowplot) ; library(tmap) ;library(tmaptools) ; library(readxl)  ; library(classInt) ; library(dplyr); library(patchwork)
 library(tidyverse)
 library(sf)
 ```
 
-
-```{r import_fonds_carte, message=FALSE, warning=FALSE}
+```{r import_fonds_carte, message=FALSE, warning=FALSE, include=T}
 epci_fonds_fm <- st_read("C:/Users/Rania El Fahli/Documents/Fonds de carte IGN 2023/EPCI.shp")
 dep_fm <- st_read("C:/Users/Rania El Fahli/Documents/Fonds de carte IGN 2023/DEPARTEMENT.shp")
 
@@ -40,10 +50,9 @@ epci_fonds_fm <- epci_fonds_fm |>
 # st_crs(dep_fm)
 ```
 
-```{r import_données, message=FALSE, warning=FALSE}
+```{r import_données, message=FALSE, warning=FALSE, include=T}
 
-setwd("C:/Users/Rania El Fahli/Documents/Tuto_carto_R/Tuto_mef_carto_R/données_epci")
-donnes_stat_locales <- list.files("C:/Users/Rania El Fahli/Documents/Tuto_carto_R/Tuto_mef_carto_R/données_epci", pattern = "*.xlsx", 
+donnes_stat_locales <- list.files("C:/Users/Rania El Fahli/Documents/tuto_carto/tuto_carto", pattern = "*.xlsx", 
                                   full.names = TRUE)
 donnes_stat_locales_f <-  lapply(donnes_stat_locales, function(x) read_excel(x, skip = 3))
 
@@ -80,9 +89,11 @@ donnes_carto <- epci_fonds_fm |>
   left_join(donnes_serie_epci_fm, by = c("CODE_SIREN" = "Code"))
 ```
 
-# Cas 1 : "Faceter" une carte 
+# Cas 1 : "Faceter" une carte
 
-## Avec Ggplot2
+Le "*faceting*" permet de générer un graphique/carte pour chaque groupe de la variable utilisée. Cela reviendrait à *subset* la table principale par groupe et réaliser la même carte à partir de chacune de ces sous-tables. Avec {ggplot2}, on utilise la fonction facet_wrap().
+
+En amont, on transforme la table au format long pour créer une variable année qui contient trois groupes correspondant aux 3 années de la table principale : 2009, 2014 et 2020.
 
 ```{r}
 
@@ -104,6 +115,8 @@ donnes_carto_l$annee <- donnes_carto_l$annee |>
   ) # on modifie les données pour l'affichage des labels ensuite 
 
 ```
+
+## Avec Ggplot2
 
 ```{r}
 theme_carte_rania <- theme(
@@ -145,7 +158,6 @@ mes_labels <- function(breaks) {
 labels_fam_mono <- mes_labels(discret_jenks[["brks"]])
 ```
 
-
 ```{r}
 
 p <- donnes_carto_l |>
@@ -164,25 +176,24 @@ guides(fill = guide_legend(title.position="top", title.hjust = 0))
 
 ```
 
-
-```{r fig.width=20, fig.height=17}
+```{r fig.width=20, fig.height=17, fig.caption = "Générer plusieurs cartes avec facet_wrap"}
 # lemon::reposition_legend() pour changer la disposition de la légende (utiliser les espaces vides)
 lemon::reposition_legend(p, "center", panel = "panel-2-2")
 ```
 
+## Avec Tmap
 
-## Avec Tmap 
+Si les cartes sont réalisées avec le package {tmap}, l'équivalent est tm_facets()
 
-Si les cartes sont réalisées avec le package tmap, on peut utiliser tm_facets()
-
-```{r fig.width=20, fig.height=17}
+```{r fig.width=20, fig.height=17, fig.cap="Générer plusieurs cartes avec tm_facets"}
 
 
 donnes_carto_l |>
   tm_shape() +
   tm_polygons("part_fam_mono", style = "jenks", n = 4, palette = palette,
-              border.col = "grey55", lwd = 0.2, title = "Part des familles monoparentales (%)", 
-              labels = c("4,5 à 10", "10 à 12,7", "12,7 à 15,7", "15,7 à 22,5"))+ 
+              border.col = "grey55", lwd = 0.2, 
+              labels = c("4,5 à 10", "10 à 12,7", "12,7 à 15,7", "15,7 à 22,5"), 
+              title = "Part des familles monoparentales (%)")+ 
   tm_facets("annee")  +
   tm_layout(
     main.title = paste0("Evolution de la part des familles monoparentales entre 2009 et 2020", 
@@ -194,27 +205,162 @@ donnes_carto_l |>
     panel.label.bg.color = "white",
     panel.label.color = "grey35", 
     panel.label.size = 3,
-    legend.title.size = 15, 
+    legend.title.size = 10, 
     legend.text.size = 2,
     legend.frame = F
-  )
+  ) # changer au choix l'afficage du panel avec les arguments de tm_layout()
   
 ```
 
+## Avec Mapsf
 
-## Avec Mapsf 
+On utilise les fonctions de base R, mfrow() et par(). 
 
-On utilise les fonctions de base R, mfrow() et par() 
+Voir les exemples de la vignette du package : Faceting with Mapsf Package : <https://riatelab.github.io/mapsf/articles/web_only/how_to_create_faceted_maps.html>
+
+# Cas 2 : Arranger des cartes individuelles
+
+Dans le cas où les cartes sont réalisées individuellement (elles ne dépendent pas d'une même table), différents packages permettent de les arranger sur une même image : 
+
+- Cowplot : <https://wilkelab.org/cowplot/index.html> 
+- Patchwork : <https://patchwork.data-imaginist.com/>
+- grid et gridExtra : <https://cran.r-project.org/web/packages/gridExtra/vignettes/arrangeGrob.html> 
 
 
-# Cas 2 : Arranger des cartes individuelles 
+```{r}
+# je génère deux cartes individuelles pour l'exemple 
+# je retire le titre & la caption que je rajouterai sur l'image finale
+
+carte_2009 <- donnes_carto_l |>
+  dplyr::filter(annee == "2009") |>
+  ggplot() + 
+  geom_sf(aes(fill = discret),color = "grey55", lwd = 0.2 ) +
+  scale_fill_manual(values = palette, labels = labels_fam_mono)+
+  geom_sf(data= dep_fm, fill = "transparent", color = "grey35", lwd = 0.5) +
+  labs(fill = "Part des familles monoparentales (%)") +
+  theme_carte_rania  + 
+  guides(fill = guide_legend(title.position="top", title.hjust = 0)) 
+
+carte_2020 <- donnes_carto_l |>
+  dplyr::filter(annee == "2020") |>
+  ggplot() + 
+  geom_sf(aes(fill = discret),color = "grey55", lwd = 0.2 ) +
+  scale_fill_manual(values = palette, labels = labels_fam_mono)+
+  geom_sf(data= dep_fm, fill = "transparent", color = "grey35", lwd = 0.5) +
+  labs(fill = "Part des familles monoparentales (%)") +
+  theme_carte_rania  +
+  guides(fill = guide_legend(title.position="top", title.hjust = 0)) 
+```
+
+## Exemple Patchwork : 
+
+```{r fig.width=35, fig.height=17, fig.cap="Assembler les cartes avec Patchwork"}
+
+# guide_area() permet de créer un espace vide pour y placer la légende, sinon elle est placée par défaut comme ici.
+# (carte_2009 + carte_2020) / guide_area() = les deux cartes côte à côte sur une première ligne, 
+
+(carte_2009 + carte_2020) +
+  plot_layout(guides = "collect") + 
+  plot_annotation(
+    title = "Evolution de la part des familles monoparentales entre 2009 et 2020", 
+    subtitle = "A l'échelle des EPCI", 
+    caption = paste0("Source : Recensement de la population, exploitation complémentaire, Insee.", 
+                        sep = "\n", "IGN 2023."),
+    tag_levels = list(c("2009", "2020")), 
+    theme = theme(
+    plot.caption = element_text(size = 22, face = "italic" ), 
+    plot.title = element_text(size = 30), 
+    plot.subtitle = element_text(size = 30),  # on peut utiliser directement la fonction theme() de ggplot2 pour personnaliser la mise en forme des différents éléments.
+  )) & theme(plot.tag = element_text(size = 30))
+```
 
 
-Références : 
+## Exemple Cowplot : 
 
-Package Cowplot : https://wilkelab.org/cowplot/index.html
+Ici il vaut mieux extraire la légende en amont et enregistrer à nouveaux les cartes sans légende. 
 
-Faceting with Mapsf Package : 
-https://riatelab.github.io/mapsf/articles/web_only/how_to_create_faceted_maps.html
+```{r}
+legende <- ggpubr::get_legend(carte_2009)
 
-Ggplot2: Elegant Graphics for Data Analysis,  9 Arranging plots  (https://ggplot2-book.org/arranging-plots), 16 Faceting (https://ggplot2-book.org/facet)
+carte_2009 <- carte_2009 + 
+  theme(legend.position = "none")
+carte_2020 <- carte_2020 + 
+  theme(legend.position = "none")
+```
+
+```{r}
+deux_cartes <- plot_grid(carte_2009 , carte_2020 ) # on met les cartes côte à côte
+# on assemble les éléments 
+deux_cartes_legende <-  ggdraw() +
+    draw_plot(deux_cartes) +
+    draw_plot(legende, scale = 2, 
+              x = -0.02, 
+              y = 0.05)
+
+# ggdraw() permet d'assembler différents types d'objets (labels, ggplots, tables gt, images)
+```
+
+```{r fig.width=35, fig.height=17, fig.cap="Assembler les cartes avec Cowplot - méthode 1"}
+# Pour les différents éléments on peut utiliser ggdraw et draw_labels, ou bien enregistrer les cartes assemblées puis utiliser annotate()
+
+deux_cartes_legende + 
+    annotate(geom = "text", 
+             label = paste0("Source : Recensement de la population, exploitation complémentaire, Insee.", 
+                        sep = "\n", "IGN 2023."), 
+             fontface = 'italic', 
+             x  = 0.85, y = 0.02, size = 5 ) +
+    annotate(geom = "text", 
+             label = paste0("Evolution de la part des familles monoparentales entre 2009 et 2020", sep = "\n", 
+                           "A l'échelle des EPCI"),
+             y = 0.95, x = 0.47, size = 8 , 
+             fontface = "bold") +
+    annotate(geom = "text", 
+             label = "2009", 
+             x = 0.118, y = 0.85, 
+             fontface = "italic", 
+             size = 10
+    ) +
+    annotate(geom = "text", 
+             label = "2020", 
+             fontface = "italic", 
+             size = 10, 
+             y = 0.85, x = 0.62) 
+```
+
+ggdraw() permet de choisir plus précisement ici la taille et le ratio des éléments. On aurait pu sinon réaliser la carte ainsi, toujours avec Cowplot : 
+
+
+```{r fig.width=35, fig.height=17, fig.cap="Assembler les cartes avec Cowplot - méthode 2"}
+
+deux_cartes_legende <- plot_grid(carte_2009, legende, carte_2020, 
+          align = "vh", 
+          nrow = 1, 
+          rel_widths = c(3, 0.85, 3)) # le ratio de chaque élément
+
+deux_cartes_legende + annotate(geom = "text", 
+             label = paste0("Source : Recensement de la population, exploitation complémentaire, Insee.", 
+                        sep = "\n", "IGN 2023."), 
+             fontface = 'italic', 
+             x  = 0.85, y = 0.02, size = 5 ) +
+    annotate(geom = "text", 
+             label = paste0("Evolution de la part des familles monoparentales entre 2009 et 2020", sep = "\n", 
+                           "A l'échelle des EPCI"),
+             y = 0.95, x = 0.47, size = 8 , 
+             fontface = "bold") +
+    annotate(geom = "text", 
+             label = "2009", 
+             x = 0.118, y = 0.85, 
+             fontface = "italic", 
+             size = 10
+    ) +
+    annotate(geom = "text", 
+             label = "2020", 
+             fontface = "italic", 
+             size = 10, 
+             y = 0.85, x = 0.62) 
+```
+
+Références :
+Ggplot2: Elegant Graphics for Data Analysis, 9 Arranging plots (<https://ggplot2-book.org/arranging-plots>), 16 Faceting (<https://ggplot2-book.org/facet>)
+Geocomputation with R : https://r.geocompx.org/ 
+
