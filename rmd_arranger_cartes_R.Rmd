@@ -1,0 +1,220 @@
+---
+title: "Arranger plusieurs cartes sur R"
+author: "Rania El Fahli"
+date: "2024-04-15"
+output: 
+ html_document:
+    toc: true
+    toc_depth : 6
+    toc_float: true
+    code_folding : hide
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	fig.height = 15,
+	fig.width = 22,
+	message = FALSE,
+	warning = FALSE
+)
+```
+
+```{r include=F}
+library(ggplot2) ;library(cowplot) ; library(tmap) ;library(tmaptools) ; library(readxl)  ; library(classInt) ; library(dplyr); 
+library(tidyverse)
+library(sf)
+```
+
+
+```{r import_fonds_carte, message=FALSE, warning=FALSE}
+epci_fonds_fm <- st_read("C:/Users/Rania El Fahli/Documents/Fonds de carte IGN 2023/EPCI.shp")
+dep_fm <- st_read("C:/Users/Rania El Fahli/Documents/Fonds de carte IGN 2023/DEPARTEMENT.shp")
+
+epci_fonds_fm <- epci_fonds_fm |>
+  dplyr::filter(NATURE != "Etablissement public territorial")
+
+# check projection 
+# st_crs(epci_fonds_fm)
+# st_crs(dep_fm)
+```
+
+```{r import_données, message=FALSE, warning=FALSE}
+
+setwd("C:/Users/Rania El Fahli/Documents/Tuto_carto_R/Tuto_mef_carto_R/données_epci")
+donnes_stat_locales <- list.files("C:/Users/Rania El Fahli/Documents/Tuto_carto_R/Tuto_mef_carto_R/données_epci", pattern = "*.xlsx", 
+                                  full.names = TRUE)
+donnes_stat_locales_f <-  lapply(donnes_stat_locales, function(x) read_excel(x, skip = 3))
+
+source("C:/Users/Rania El Fahli/Documents/Atlas/Cartes/Scripts/codes_epci_dom.R") # vecteur contenant les codes des EPCI d'Outre-Mer pour filtrer + facilement.
+
+rename_colonne <- function(x) { 
+  names(x) <- str_replace(names(x), "Part des familles monoparentales ", "part_fam_mono_")
+  return(x)
+  
+}
+donnes_stat_locales_f <- donnes_stat_locales_f |>
+  lapply(rename_colonne)
+
+donnes_stat_locales_f <- lapply(donnes_stat_locales_f, function(x) filter(x, !Code %in% epci_dom))
+donnes_stat_locales_f <- lapply(donnes_stat_locales_f, function(x)select(x, -c(Libellé)))
+donnes_serie_epci_fm <- plyr::join_all(donnes_stat_locales_f, by = "Code", type = "left")
+donnes_serie_epci_fm <- donnes_serie_epci_fm |>
+  mutate_at(vars(starts_with("part_fam_mono")), as.numeric)
+```
+
+```{r message=FALSE, warning=FALSE}
+donnes_long <- donnes_serie_epci_fm |>
+  pivot_longer(!c(Code), 
+               names_to = "annee", 
+               values_to = "part_fam_mono")
+
+discret_jenks <- classInt::classIntervals(donnes_long$part_fam_mono, style = "jenks", n = 4)
+discret_jenks_v <- c(4.4, 10.0, 12.7, 15.7, 22.5)
+palette <- rcartocolor::carto_pal(n = 4, name = "PinkYl")
+```
+
+```{r message=FALSE, warning=FALSE}
+donnes_carto <- epci_fonds_fm |>
+  left_join(donnes_serie_epci_fm, by = c("CODE_SIREN" = "Code"))
+```
+
+# Cas 1 : "Faceter" une carte 
+
+## Avec Ggplot2
+
+```{r}
+
+# on transforme la table au format long pour avoir une variable "année" qu'on utilise 
+# ensuite pour le faceting 
+
+donnes_carto_l <- donnes_carto |>
+  select(c(CODE_SIREN, geometry, starts_with("part_fam_mono"))) |>
+   pivot_longer(!c(CODE_SIREN, geometry), 
+               names_to = "annee",
+               values_to = "part_fam_mono") 
+
+donnes_carto_l$annee <- as.factor(donnes_carto_l$annee)
+donnes_carto_l$annee <- donnes_carto_l$annee |>
+  forcats::fct_recode(
+     "2009" = "part_fam_mono_2009",
+     "2014" = "part_fam_mono_2014",
+     "2020" = "part_fam_mono_2020"
+  ) # on modifie les données pour l'affichage des labels ensuite 
+
+```
+
+```{r}
+theme_carte_rania <- theme(
+  panel.background = element_blank(), 
+          panel.grid = element_blank(),
+          axis.line = element_blank(), 
+          axis.text.x = element_blank(), 
+          axis.text.y = element_blank(), 
+          axis.ticks.x = element_blank(), 
+          axis.ticks.y = element_blank(), 
+          legend.box = "vertical",
+          legend.key.width = unit(0.4, "cm"), 
+          legend.key.height = unit(1, "cm"),
+          legend.key = element_rect(colour = "transparent",), 
+          legend.background = element_rect(fill='transparent', colour = "grey35", size = 0.8),
+          legend.title = element_text(size = 18),
+          legend.text = element_text(size = 16), 
+          legend.key.size = unit(1.7,'cm'),
+          legend.spacing.y = unit(1.3, 'cm'),
+          legend.title.align = 0,
+  plot.title = element_text(size = 22, face = "bold"), 
+  plot.subtitle = element_text(size = 20, face = "bold"), 
+  plot.caption = element_text(size = 12, hjust = 0, face = "italic"), 
+  # élements relatifs aux labels du facet_wrap 
+  strip.background =  element_rect(
+  color="grey35", fill="transparent", size=0.8, linetype="solid"), 
+  strip.text = element_text(size = 18, face = "bold.italic")
+)
+```
+
+```{r}
+donnes_carto_l$discret <-  cut(donnes_carto_l$part_fam_mono, c(discret_jenks_v))
+
+mes_labels <- function(breaks) {
+    do.call(\(...) sprintf('De %s à %s', ...),
+            cbind.data.frame(breaks[-length(breaks)] , breaks[-1]))
+}
+
+labels_fam_mono <- mes_labels(discret_jenks[["brks"]])
+```
+
+
+```{r}
+
+p <- donnes_carto_l |>
+  ggplot() + 
+  geom_sf(aes(fill = discret),color = "grey55", lwd = 0.2 ) +
+  scale_fill_manual(values = palette, labels = labels_fam_mono)+
+  geom_sf(data= dep_fm, fill = "transparent", color = "grey35", lwd = 0.5) +
+  labs(fill = "Part des familles monoparentales (%)", 
+       title = "Evolution de la part des familles monoparentales entre 2009 et 2020", 
+       subtitle = "A l'échelle des EPCI", 
+       caption = paste0("Source : Recensement de la population, exploitation complémentaire, Insee.", 
+                        sep = "\n", "IGN 2023.")) +
+  theme_carte_rania  +
+  facet_wrap(~annee, nrow = 2, ncol = 2) + # modifier les arguments nrow et ncol pour changer la disposition des cartes
+guides(fill = guide_legend(title.position="top", title.hjust = 0)) 
+
+```
+
+
+```{r fig.width=20, fig.height=17}
+# lemon::reposition_legend() pour changer la disposition de la légende (utiliser les espaces vides)
+lemon::reposition_legend(p, "center", panel = "panel-2-2")
+```
+
+
+## Avec Tmap 
+
+Si les cartes sont réalisées avec le package tmap, on peut utiliser tm_facets()
+
+```{r fig.width=20, fig.height=17}
+
+
+donnes_carto_l |>
+  tm_shape() +
+  tm_polygons("part_fam_mono", style = "jenks", n = 4, palette = palette,
+              border.col = "grey55", lwd = 0.2, title = "Part des familles monoparentales (%)", 
+              labels = c("4,5 à 10", "10 à 12,7", "12,7 à 15,7", "15,7 à 22,5"))+ 
+  tm_facets("annee")  +
+  tm_layout(
+    main.title = paste0("Evolution de la part des familles monoparentales entre 2009 et 2020", 
+                   sep = "\n","A l'échelle des EPCI" ),
+   main.title.size = 2, 
+   main.title.fontface = "bold", 
+   main.title.position = c("left", "top"),
+    panel.label.fontface = "bold", 
+    panel.label.bg.color = "white",
+    panel.label.color = "grey35", 
+    panel.label.size = 3,
+    legend.title.size = 15, 
+    legend.text.size = 2,
+    legend.frame = F
+  )
+  
+```
+
+
+## Avec Mapsf 
+
+On utilise les fonctions de base R, mfrow() et par() 
+
+
+# Cas 2 : Arranger des cartes individuelles 
+
+
+Références : 
+
+Package Cowplot : https://wilkelab.org/cowplot/index.html
+
+Faceting with Mapsf Package : 
+https://riatelab.github.io/mapsf/articles/web_only/how_to_create_faceted_maps.html
+
+Ggplot2: Elegant Graphics for Data Analysis,  9 Arranging plots  (https://ggplot2-book.org/arranging-plots), 16 Faceting (https://ggplot2-book.org/facet)
